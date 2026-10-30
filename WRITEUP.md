@@ -135,16 +135,34 @@ The controller writes two log files during a run:
 - `steer_pid_data.txt`: iteration, steering error, steering output, nearest-path distance, selected indices, yaw, and transformed target errors.
 - `throttle_pid_data.txt`: iteration, speed error, brake output, and throttle output.
 
-The steering plot should show the command changing sign as the vehicle enters and exits each avoidance maneuver. Because the controller is proportional-only, steering output should track steering error without integral lag. Flat sections at $\pm0.20$ indicate actuator saturation; brief saturation can be acceptable, but prolonged saturation usually indicates that the vehicle and trajectory have diverged.
+### Steering result
 
-The longitudinal plot should show a large positive speed error during initial acceleration, followed by a reduction as measured speed approaches the planned speed. Short brake pulses may appear when the actual speed exceeds the planned profile. Stable operation is indicated by bounded speed error and by the absence of rapid throttle/brake switching.
+![Steering PID performance](project/pid_plots/final/steering_pid.png)
+
+The steering command follows the steering error with the same shape because the final steering controller is proportional-only. During normal path tracking, both curves remain close to zero and change sign smoothly as the vehicle enters and exits avoidance maneuvers. Near iterations 100–108, the requested steering angle rises sharply and the command briefly reaches the configured $0.20$ limit. It then leaves saturation and returns toward zero. This short saturation period provides the strong turn needed for avoidance without remaining locked at the actuator limit.
+
+The command is smaller than the error because it is scaled by $K_p=0.45$. For unsaturated samples,
+
+$$u_{\text{steer}}=0.45e_{\text{steer}}.$$
+
+The absence of high-frequency oscillation after the large correction indicates that omitting integral and derivative action from steering produced a stable response for this trajectory.
+
+### Longitudinal result
+
+![Longitudinal PID performance](project/pid_plots/final/throttle_pid.png)
+
+The initial speed error is large because the vehicle starts nearly stationary while the trajectory requests forward motion. The throttle therefore initially reaches its upper limit. The speed error then decreases rapidly and continues converging toward zero. After the initial transient, the throttle settles near 0.3–0.32, which is the effort required to maintain the requested speed against the simulated vehicle resistance.
+
+The brake command remains zero in this run because the measured speed does not significantly exceed the planned speed. The smooth reduction in speed error and absence of rapid throttle/brake switching show that the longitudinal PID is stable. The integral term supplies the small persistent command required to remove steady-state speed error, while the derivative term damps the early transient.
 
 Plots can be generated from the recorded files with:
 
 ```bash
-cd project/pid_controller
-python3 ../plot_pid.py
+cd project
+python3 plot_pid.py
 ```
+
+The generated figures are saved in `project/pid_plots/final/`.
 
 ## 7. Tuning Process
 
