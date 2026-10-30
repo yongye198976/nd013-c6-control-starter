@@ -101,7 +101,7 @@ void path_planner(vector<double>& x_points, vector<double>& y_points, vector<dou
   ego_state.velocity.x = velocity;
 
   if( x_points.size() > 1 ){
-  	ego_state.rotation.yaw = angle_between_points(x_points[x_points.size()-2], y_points[y_points.size()-2], x_points[x_points.size()-1], y_points[y_points.size()-1]);
+    	ego_state.rotation.yaw = angle_between_points(x_points[x_points.size()-2], y_points[y_points.size()-2], x_points[x_points.size()-1], y_points[y_points.size()-1]);
   	ego_state.velocity.x = v_points[v_points.size()-1];
   	if(velocity < 0.01)
   		ego_state.rotation.yaw = yaw;
@@ -116,7 +116,7 @@ void path_planner(vector<double>& x_points, vector<double>& y_points, vector<dou
 
   	int max_points = 20;
   	double point_x = x_points[x_points.size()-1];
-  	double point_y = y_points[x_points.size()-1];
+  	double point_y = y_points[y_points.size()-1];
   	while( x_points.size() < max_points ){
   	  x_points.push_back(point_x);
   	  y_points.push_back(point_y);
@@ -128,7 +128,36 @@ void path_planner(vector<double>& x_points, vector<double>& y_points, vector<dou
 
   auto goal_set = motion_planner.generate_offset_goals(goal);
 
+  cout << "PLANNER INPUT"
+    << " | ego: (" << ego_state.location.x
+    << ", " << ego_state.location.y << ")"
+    << " | ego_yaw: " << ego_state.rotation.yaw
+    << " | ego_speed: " << ego_state.velocity.x
+    << " | goal: (" << goal.location.x
+    << ", " << goal.location.y << ")"
+    << " | goal_yaw: " << goal.rotation.yaw
+    << " | goal_speed: " << utils::magnitude(goal.velocity)
+    << " | goal_set_size: " << goal_set.size()
+    << endl;
+
+  for(int j = 0; j < static_cast<int>(goal_set.size()); ++j){
+    double goal_dx = goal_set[j].location.x - ego_state.location.x;
+    double goal_dy = goal_set[j].location.y - ego_state.location.y;
+    double goal_distance = sqrt(goal_dx * goal_dx + goal_dy * goal_dy);
+    double goal_forward = cos(ego_state.rotation.yaw) * goal_dx +
+           sin(ego_state.rotation.yaw) * goal_dy;
+
+    cout << "goal_set[" << j << "]"
+      << " | position: (" << goal_set[j].location.x
+      << ", " << goal_set[j].location.y << ")"
+      << " | yaw: " << goal_set[j].rotation.yaw
+      << " | distance: " << goal_distance
+      << " | forward: " << goal_forward
+      << endl;
+  }
+
   auto spirals = motion_planner.generate_spirals(ego_state, goal_set);
+  cout << "spirals_size: " << spirals.size() << endl;
 
   auto desired_speed = utils::magnitude(goal.velocity);
 
@@ -227,6 +256,8 @@ int main ()
 
   PID pid_steer = PID();
   PID pid_throttle = PID();
+  pid_steer.Init(0.45, 0.0, 0.0, 0.20, -0.20);
+  pid_throttle.Init(0.4, 0.02, 0.02, 1.0, -1.0);
 
   h.onMessage([&pid_steer, &pid_throttle, &new_delta_time, &timer, &prev_timer, &i, &prev_timer](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length, uWS::OpCode opCode)
   {
@@ -274,7 +305,7 @@ int main ()
           vector< vector<double> > spirals_v;
           vector<int> best_spirals;
 
-          path_planner(x_points, y_points, v_points, yaw, velocity, goal, is_junction, tl_state, spirals_x, spirals_y, spirals_v, best_spirals);
+          path_planner(x_points, y_points, v_points, yaw, velocity, goal, false, tl_state, spirals_x, spirals_y, spirals_v, best_spirals);
 
           // Save time and compute delta time
           time(&timer);
@@ -288,8 +319,8 @@ int main ()
           /**
           * TODO (step 3): uncomment these lines
           **/
-//           // Update the delta time with the previous command
-//           pid_steer.UpdateDeltaTime(new_delta_time);
+          // Update the delta time with the previous command
+          pid_steer.UpdateDeltaTime(new_delta_time);
 
           // Compute steer error
           double error_steer;
@@ -300,23 +331,61 @@ int main ()
           /**
           * TODO (step 3): compute the steer error (error_steer) from the position and the desired trajectory
           **/
-//           error_steer = 0;
+          int closest_idx = 0;
+          double min_distance = std::numeric_limits<double>::max();
+
+          for (int j = 0; j < static_cast<int>(x_points.size()); ++j) {
+            double point_dx = x_points[j] - x_position;
+            double point_dy = y_points[j] - y_position;
+            double distance = point_dx * point_dx + point_dy * point_dy;
+
+            if (distance < min_distance) {
+              min_distance = distance;
+              closest_idx = j;
+            }
+          }
+
+          int target_idx = std::min(
+            closest_idx + 6,
+            static_cast<int>(x_points.size()) - 1
+          );
+
+          double dx = x_points[target_idx] - x_position;
+          double dy = y_points[target_idx] - y_position;
+
+          double forward_error = cos(yaw) * dx + sin(yaw) * dy;
+          double lateral_error = -sin(yaw) * dx + cos(yaw) * dy;
+          if (forward_error > 0.0) {
+            double steering_lookahead = max(5.0, min(forward_error, 12.0));
+            double target_angle = atan2(lateral_error, steering_lookahead);
+            error_steer = max(-0.45, min(target_angle, 0.45));
+          } else {
+            error_steer = 0.0;
+          }
 
           /**
           * TODO (step 3): uncomment these lines
           **/
-//           // Compute control to apply
-//           pid_steer.UpdateError(error_steer);
-//           steer_output = pid_steer.TotalError();
+            // Compute control to apply
+            pid_steer.UpdateError(error_steer);
+            steer_output = pid_steer.TotalError();
 
-//           // Save data
-//           file_steer.seekg(std::ios::beg);
-//           for(int j=0; j < i - 1; ++j) {
-//               file_steer.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-//           }
-//           file_steer  << i ;
-//           file_steer  << " " << error_steer;
-//           file_steer  << " " << steer_output << endl;
+            // Save data
+            file_steer.seekg(std::ios::beg);
+            for(int j=0; j < i - 1; ++j) {
+              file_steer.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+            }
+            file_steer  << i ;
+            file_steer  << " " << error_steer;
+            file_steer  << " " << steer_output;
+            file_steer  << " " << sqrt(min_distance);
+            file_steer  << " " << closest_idx;
+            file_steer  << " " << target_idx;
+            file_steer  << " " << yaw;
+            file_steer  << " " << dx;
+            file_steer  << " " << dy;
+            file_steer  << " " << forward_error;
+            file_steer  << " " << lateral_error << endl;
 
           ////////////////////////////////////////
           // Throttle control
@@ -325,8 +394,8 @@ int main ()
           /**
           * TODO (step 2): uncomment these lines
           **/
-//           // Update the delta time with the previous command
-//           pid_throttle.UpdateDeltaTime(new_delta_time);
+          // Update the delta time with the previous command
+          pid_throttle.UpdateDeltaTime(new_delta_time);
 
           // Compute error of speed
           double error_throttle;
@@ -334,7 +403,25 @@ int main ()
           * TODO (step 2): compute the throttle error (error_throttle) from the position and the desired speed
           **/
           // modify the following line for step 2
-          error_throttle = 0;
+          int speed_point_count = std::min(3, static_cast<int>(v_points.size()));
+          double target_velocity = 0.0;
+          for (int j = 0; j < speed_point_count; ++j) {
+            target_velocity += v_points[j];
+          }
+          target_velocity /= speed_point_count;
+          cout << "closest_idx: " << closest_idx
+               << " | target_idx: " << target_idx
+               << " | point_speed: " << v_points[target_idx]
+               << " | throttle_target: " << target_velocity
+               << " | ego_speed: " << velocity
+               << " | maneuver: "
+               << behavior_planner.get_active_maneuver() << endl;
+          cout << "v_points: ";
+          for (double planned_velocity : v_points) {
+            cout << planned_velocity << " ";
+          }
+          cout << endl;
+          error_throttle = target_velocity - velocity;
 
 
 
@@ -344,28 +431,28 @@ int main ()
           /**
           * TODO (step 2): uncomment these lines
           **/
-//           // Compute control to apply
-//           pid_throttle.UpdateError(error_throttle);
-//           double throttle = pid_throttle.TotalError();
+          // Compute control to apply
+          pid_throttle.UpdateError(error_throttle);
+          double throttle = pid_throttle.TotalError();
 
-//           // Adapt the negative throttle to break
-//           if (throttle > 0.0) {
-//             throttle_output = throttle;
-//             brake_output = 0;
-//           } else {
-//             throttle_output = 0;
-//             brake_output = -throttle;
-//           }
+          // Adapt the negative throttle to break
+          if (throttle > 0.0) {
+            throttle_output = throttle;
+            brake_output = 0;
+          } else {
+            throttle_output = 0;
+            brake_output = -throttle;
+          }
 
-//           // Save data
-//           file_throttle.seekg(std::ios::beg);
-//           for(int j=0; j < i - 1; ++j){
-//               file_throttle.ignore(std::numeric_limits<std::streamsize>::max(),'\n');
-//           }
-//           file_throttle  << i ;
-//           file_throttle  << " " << error_throttle;
-//           file_throttle  << " " << brake_output;
-//           file_throttle  << " " << throttle_output << endl;
+          // Save data
+          file_throttle.seekg(std::ios::beg);
+          for(int j=0; j < i - 1; ++j){
+              file_throttle.ignore(std::numeric_limits<std::streamsize>::max(),'\n');
+          }
+          file_throttle  << i ;
+          file_throttle  << " " << error_throttle;
+          file_throttle  << " " << brake_output;
+          file_throttle  << " " << throttle_output << endl;
 
 
           // Send control

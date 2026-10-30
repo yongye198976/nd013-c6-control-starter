@@ -246,7 +246,7 @@ class World(object):
 
         # increase wait time for debug
         wait_time = 0.0
-        delta_t = 0.05
+        delta_t = max(0.0, min(sim_time - last_move_time, 0.05))
         if (sim_time - last_move_time) > wait_time:
             last_move_time = sim_time
             # move car using interpolation based on the velocity label form trajectory points
@@ -858,7 +858,7 @@ def game_loop(args):
                 location_y = t.location.y
                 location_z = t.location.z
 
-                ws.send(json.dumps({'traj_x': x_points, 'traj_y': y_points, 'traj_v': v_points ,'yaw': _prev_yaw, "velocity": velocity, 'time': sim_time, 'waypoint_x': waypoint_x, 'waypoint_y': waypoint_y, 'waypoint_t': waypoint_t, 'waypoint_j': waypoint_j, 'tl_state': _tl_state, 'obst_x': obst_x, 'obst_y': obst_y, 'location_x': location_x, 'location_y': location_y, 'location_z': location_z } ))
+                ws.send(json.dumps({'traj_x': x_points, 'traj_y': y_points, 'traj_v': v_points ,'yaw': math.radians(t.rotation.yaw), "velocity": velocity, 'time': sim_time, 'waypoint_x': waypoint_x, 'waypoint_y': waypoint_y, 'waypoint_t': waypoint_t, 'waypoint_j': waypoint_j, 'tl_state': _tl_state, 'obst_x': obst_x, 'obst_y': obst_y, 'location_x': location_x, 'location_y': location_y, 'location_z': location_z } ))
 
             clock.tick_busy_loop(60)
             world.tick(clock)
